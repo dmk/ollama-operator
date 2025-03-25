@@ -217,9 +217,10 @@ func main() {
 	ollamaClient := api.NewClient(ollamaURL, http.DefaultClient)
 
 	if err = (&controller.OllamaModelReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Ollama: ollamaClient,
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Ollama:   ollamaClient,
+		Recorder: mgr.GetEventRecorderFor("ollama-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "OllamaModel")
 		os.Exit(1)

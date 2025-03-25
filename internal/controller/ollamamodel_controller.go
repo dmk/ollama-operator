@@ -19,9 +19,11 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -34,8 +36,9 @@ import (
 // OllamaModelReconciler reconciles a OllamaModel object
 type OllamaModelReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Ollama *api.Client
+	Scheme   *runtime.Scheme
+	Ollama   *api.Client
+	Recorder record.EventRecorder
 }
 
 const ollamaModelFinalizer = "ollama.smithforge.dev/finalizer"
@@ -74,6 +77,12 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	log.Info("reconciling OllamaModel", "name", ollamaModel.Name, "model", modelName)
+
+	// Check for refresh annotation
+	if val, exists := ollamaModel.Annotations["ollama.smithforge.dev/refresh"]; exists && val == "true" {
+		log.Info("refresh annotation detected, forcing model refresh", "name", ollamaModel.Name, "model", modelName)
+		return r.refreshModel(ctx, ollamaModel, modelName)
+	}
 
 	// Initialize status if needed
 	if ollamaModel.Status.State == "" {
@@ -238,6 +247,65 @@ func (r *OllamaModelReconciler) handleDeletion(ctx context.Context, ollamaModel 
 		}
 	}
 
+	return ctrl.Result{}, nil
+}
+
+// refreshModel forces a model to be re-pulled and updates its status
+func (r *OllamaModelReconciler) refreshModel(ctx context.Context, ollamaModel *ollamamodel.OllamaModel, modelName string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	// Record event for refresh start
+	r.Recorder.Event(ollamaModel, "Normal", "RefreshStarted", fmt.Sprintf("Starting refresh of model %s", modelName))
+
+	// Set state to pulling to indicate a refresh is in progress
+	ollamaModel.Status.State = ollamamodel.StatePulling
+	if err := r.Status().Update(ctx, ollamaModel); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Pull the model
+	log.Info("starting model refresh", "name", ollamaModel.Name, "model", modelName)
+	pullReq := &api.PullRequest{Name: modelName}
+	err := r.Ollama.Pull(ctx, pullReq, func(resp api.ProgressResponse) error {
+		log.Info("refresh progress", "model", modelName, "status", resp.Status, "completed", resp.Completed)
+		return nil
+	})
+
+	if err != nil {
+		log.Error(err, "failed to refresh model", "model", modelName)
+		ollamaModel.Status.State = ollamamodel.StateFailed
+		ollamaModel.Status.Error = err.Error()
+
+		// Record event for refresh failure
+		r.Recorder.Event(ollamaModel, "Warning", "RefreshFailed",
+			fmt.Sprintf("Failed to refresh model %s: %v", modelName, err))
+
+		if updateErr := r.Status().Update(ctx, ollamaModel); updateErr != nil {
+			return ctrl.Result{}, updateErr
+		}
+		return ctrl.Result{}, err
+	}
+
+	// Update the model details
+	result, err := r.updateModelDetails(ctx, ollamaModel, modelName)
+	if err != nil {
+		return result, err
+	}
+
+	// Update the annotation to indicate the refresh is complete
+	if ollamaModel.Annotations == nil {
+		ollamaModel.Annotations = make(map[string]string)
+	}
+	ollamaModel.Annotations["ollama.smithforge.dev/refresh"] = fmt.Sprintf("completed-%s", time.Now().Format(time.RFC3339))
+	if err := r.Update(ctx, ollamaModel); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// Record event for successful refresh
+	r.Recorder.Event(ollamaModel, "Normal", "RefreshCompleted",
+		fmt.Sprintf("Successfully refreshed model %s (size: %s)", modelName, ollamaModel.Status.FormattedSize))
+
+	log.Info("model refresh completed successfully", "name", ollamaModel.Name, "model", modelName)
 	return ctrl.Result{}, nil
 }
 

@@ -115,6 +115,47 @@ The operator connects to the Ollama API to:
 3. Delete models when resources are removed
 4. Update status information about each model
 
+## Advanced Features
+
+### Model Refresh/Update
+
+You can force a model to be refreshed or updated using annotations:
+
+```yaml
+apiVersion: ollama.smithforge.dev/v1alpha1
+kind: OllamaModel
+metadata:
+  name: llama3.2-1b
+  annotations:
+    ollama.smithforge.dev/refresh: "true"  # Triggers a model refresh
+spec:
+  name: llama3.2
+  tag: 1b
+```
+
+This is useful when Ollama releases updates to existing models or when you need to force a re-pull of a model.
+
+To trigger a refresh using kubectl:
+
+```sh
+kubectl annotate ollamamodel llama3.2-1b ollama.smithforge.dev/refresh=true --overwrite
+```
+
+After processing the refresh, the annotation value will be updated with a timestamp to indicate completion.
+
+## Roadmap
+
+The following features are planned for upcoming releases:
+
+1. **Model Updates/Refreshes** - Force models to be re-pulled using annotations (implemented)
+2. **Error Recovery** - Automatically recover if Ollama loses models but the CRD still exists
+3. **Health Checks** - Periodically verify models are still available in Ollama
+4. **Resource Management** - Add configuration for resource limits/requests
+5. **Events** - Record Kubernetes events for important state changes
+6. **Metrics** - Export Prometheus metrics for model usage and metadata
+7. **Webhook Validation** - Add validation webhooks to prevent invalid configurations
+8. **Multiple Ollama Instances** - Support targeting different Ollama instances
+
 ## Uninstalling
 
 **Delete all model instances (CRs) from the cluster:**
