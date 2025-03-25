@@ -56,6 +56,9 @@ type OllamaModelStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	Size int64 `json:"size,omitempty"`
 
+	// FormattedSize is the human-readable size of the model (e.g., "4.2 GiB")
+	FormattedSize string `json:"formattedSize,omitempty"`
+
 	// Error message if the model is in failed state
 	// +kubebuilder:validation:MaxLength=1024
 	Error string `json:"error,omitempty"`
@@ -66,7 +69,7 @@ type OllamaModelStatus struct {
 // +kubebuilder:printcolumn:name="Name",type="string",JSONPath=".spec.name"
 // +kubebuilder:printcolumn:name="Tag",type="string",JSONPath=".spec.tag"
 // +kubebuilder:printcolumn:name="State",type="string",JSONPath=".status.state"
-// +kubebuilder:printcolumn:name="Size",type="integer",JSONPath=".status.size"
+// +kubebuilder:printcolumn:name="Size",type="string",JSONPath=".status.formattedSize"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 // OllamaModel is the Schema for the ollamamodels API.

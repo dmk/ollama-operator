@@ -113,63 +113,106 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				return ctrl.Result{}, err
 			}
 
-			// Update state to ready since pull completed
-			now := metav1.Now()
-			ollamaModel.Status.State = "ready"
-			ollamaModel.Status.LastPullTime = &now
-
-			// Get model details now that it's been pulled
-			showResp, err := r.Ollama.Show(ctx, showReq)
-			if err == nil && showResp != nil {
-				// The Show response might not have size info directly
-				// Use placeholder values for now
-				ollamaModel.Status.Size = 0
-				if showResp.Modelfile != "" {
-					// Use first 64 chars of the modelfile hash as digest
-					digest := fmt.Sprintf("%064x", showResp.Modelfile)
-					if len(digest) > 64 {
-						digest = digest[:64]
-					}
-					ollamaModel.Status.Digest = digest
-				}
-			}
-
-			if err := r.Status().Update(ctx, ollamaModel); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
+			log.Info("model pull completed successfully", "name", ollamaModel.Name, "model", modelName)
+			return r.updateModelDetails(ctx, ollamaModel, modelName)
 		}
 	} else {
 		// Model exists, update to ready if not already
 		if ollamaModel.Status.State != "ready" {
 			log.Info("model already exists, marking as ready", "name", ollamaModel.Name, "model", modelName)
-			now := metav1.Now()
-			ollamaModel.Status.State = "ready"
-			ollamaModel.Status.LastPullTime = &now
-
-			// Get model details
-			showResp, err := r.Ollama.Show(ctx, showReq)
-			if err == nil && showResp != nil {
-				// The Show response might not have size info directly
-				// Use placeholder values for now
-				ollamaModel.Status.Size = 0
-				if showResp.Modelfile != "" {
-					// Use first 64 chars of the modelfile hash as digest
-					digest := fmt.Sprintf("%064x", showResp.Modelfile)
-					if len(digest) > 64 {
-						digest = digest[:64]
-					}
-					ollamaModel.Status.Digest = digest
-				}
-			}
-
-			if err := r.Status().Update(ctx, ollamaModel); err != nil {
-				return ctrl.Result{}, err
-			}
+			return r.updateModelDetails(ctx, ollamaModel, modelName)
 		}
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// updateModelDetails updates the OllamaModel details including state, digest, and size
+func (r *OllamaModelReconciler) updateModelDetails(ctx context.Context, ollamaModel *ollamav1alpha1.OllamaModel, modelName string) (ctrl.Result, error) {
+	log := log.FromContext(ctx)
+
+	// Update state to ready
+	now := metav1.Now()
+	ollamaModel.Status.State = "ready"
+	ollamaModel.Status.LastPullTime = &now
+
+	// Get model details
+	showReq := &api.ShowRequest{Name: modelName}
+	showResp, err := r.Ollama.Show(ctx, showReq)
+	if err == nil && showResp != nil {
+		// Get digest from show response
+		if showResp.Modelfile != "" {
+			// Use first 64 chars of the modelfile hash as digest
+			digest := fmt.Sprintf("%064x", showResp.Modelfile)
+			if len(digest) > 64 {
+				digest = digest[:64]
+			}
+			ollamaModel.Status.Digest = digest
+		}
+
+		// Get the model size by listing models
+		listResp, listErr := r.Ollama.List(ctx)
+		if listErr == nil {
+			// Find the model in the list
+			for _, model := range listResp.Models {
+				// Check if this is our model
+				if model.Name == modelName {
+					// Update the size from the list response
+					ollamaModel.Status.Size = model.Size
+					// Set the formatted size
+					ollamaModel.Status.FormattedSize = formatBytes(model.Size)
+					log.Info("updated model size", "model", modelName, "size", model.Size, "formattedSize", ollamaModel.Status.FormattedSize)
+					break
+				}
+			}
+		} else {
+			log.Error(listErr, "failed to list models to get size", "model", modelName)
+		}
+	}
+
+	if err := r.Status().Update(ctx, ollamaModel); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// formatBytes converts bytes to a human-readable string (e.g., "4.2 GiB")
+func formatBytes(bytes int64) string {
+	const (
+		_          = iota
+		KB float64 = 1 << (10 * iota)
+		MB
+		GB
+		TB
+		PB
+	)
+
+	if bytes < 1024 {
+		return fmt.Sprintf("%d B", bytes)
+	}
+
+	var value float64
+	var unit string
+
+	switch {
+	case bytes >= int64(PB):
+		value = float64(bytes) / PB
+		unit = "PiB"
+	case bytes >= int64(TB):
+		value = float64(bytes) / TB
+		unit = "TiB"
+	case bytes >= int64(GB):
+		value = float64(bytes) / GB
+		unit = "GiB"
+	case bytes >= int64(MB):
+		value = float64(bytes) / MB
+		unit = "MiB"
+	case bytes >= int64(KB):
+		value = float64(bytes) / KB
+		unit = "KiB"
+	}
+
+	return fmt.Sprintf("%.1f %s", value, unit)
 }
 
 // handleDeletion handles the deletion of a model when the OllamaModel resource is deleted

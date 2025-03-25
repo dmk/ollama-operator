@@ -24,9 +24,9 @@ spec:
     - jsonPath: .status.state
       name: State
       type: string
-    - jsonPath: .status.size
+    - jsonPath: .status.formattedSize
       name: Size
-      type: integer
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -78,6 +78,10 @@ spec:
               error:
                 description: Error message if the model is in failed state
                 maxLength: 1024
+                type: string
+              formattedSize:
+                description: FormattedSize is the human-readable size of the model
+                  (e.g., "4.2 GiB")
                 type: string
               lastPullTime:
                 description: LastPullTime is the timestamp of the last successful
