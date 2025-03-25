@@ -1,7 +1,0 @@
-apiVersion: ollama.io/v1alpha1
-kind: OllamaModel
-metadata:
-  name: llama3.2
-spec:
-  modelName: llama3.2
-  tag: 1b

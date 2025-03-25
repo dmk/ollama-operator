@@ -1,0 +1,7 @@
+apiVersion: ollama.smithforge.dev/v1alpha1
+kind: OllamaModel
+metadata:
+  name: llama3.2-1b
+spec:
+  name: llama3.2
+  tag: 1b

@@ -1,0 +1,7 @@
+apiVersion: ollama.smithforge.dev/v1alpha1
+kind: OllamaModel
+metadata:
+  name: gemma3-1b
+spec:
+  name: gemma3
+  tag: 1b

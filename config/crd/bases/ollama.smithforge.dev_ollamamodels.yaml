@@ -1,0 +1,106 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: ollamamodels.ollama.smithforge.dev
+spec:
+  group: ollama.smithforge.dev
+  names:
+    kind: OllamaModel
+    listKind: OllamaModelList
+    plural: ollamamodels
+    singular: ollamamodel
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.name
+      name: Name
+      type: string
+    - jsonPath: .spec.tag
+      name: Tag
+      type: string
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.size
+      name: Size
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: OllamaModel is the Schema for the ollamamodels API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: OllamaModelSpec defines the desired state of OllamaModel.
+            properties:
+              name:
+                description: Name is the name of the Ollama model (e.g., "llama3.2",
+                  "gemma3")
+                minLength: 1
+                type: string
+              tag:
+                description: Tag is the version/tag of the model (e.g., "7b", "1b")
+                minLength: 1
+                type: string
+            required:
+            - name
+            - tag
+            type: object
+          status:
+            description: OllamaModelStatus defines the observed state of OllamaModel.
+            properties:
+              digest:
+                description: Digest is the SHA256 digest of the model file
+                pattern: ^[a-f0-9]{64}$
+                type: string
+              error:
+                description: Error message if the model is in failed state
+                maxLength: 1024
+                type: string
+              lastPullTime:
+                description: LastPullTime is the timestamp of the last successful
+                  model pull
+                format: date-time
+                type: string
+              size:
+                description: Size is the size of the model in bytes
+                format: int64
+                minimum: 0
+                type: integer
+              state:
+                description: State represents the current state of the model (pending,
+                  pulling, ready, failed)
+                enum:
+                - pending
+                - pulling
+                - ready
+                - failed
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
