@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	ollamav1alpha1 "github.com/dmk/ollama-operator/api/v1alpha1"
+	ollamamodel "github.com/dmk/ollama-operator/api/v1alpha1"
 	"github.com/ollama/ollama/api"
 )
 
@@ -48,7 +48,7 @@ const ollamaModelFinalizer = "ollama.smithforge.dev/finalizer"
 // move the current state of the cluster closer to the desired state.
 func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
-	ollamaModel := &ollamav1alpha1.OllamaModel{}
+	ollamaModel := &ollamamodel.OllamaModel{}
 
 	if err := r.Get(ctx, req.NamespacedName, ollamaModel); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -78,7 +78,7 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Initialize status if needed
 	if ollamaModel.Status.State == "" {
 		log.Info("initializing model status", "name", ollamaModel.Name)
-		ollamaModel.Status.State = "pending"
+		ollamaModel.Status.State = ollamamodel.StatePending
 		if err := r.Status().Update(ctx, ollamaModel); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -90,9 +90,9 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	_, err := r.Ollama.Show(ctx, showReq)
 	if err != nil {
 		// Model doesn't exist, start pulling
-		if ollamaModel.Status.State == "pending" {
+		if ollamaModel.Status.State == ollamamodel.StatePending {
 			log.Info("starting model pull", "name", ollamaModel.Name, "model", modelName)
-			ollamaModel.Status.State = "pulling"
+			ollamaModel.Status.State = ollamamodel.StatePulling
 			if err := r.Status().Update(ctx, ollamaModel); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -105,7 +105,7 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			})
 			if err != nil {
 				log.Error(err, "failed to pull model", "model", modelName)
-				ollamaModel.Status.State = "failed"
+				ollamaModel.Status.State = ollamamodel.StateFailed
 				ollamaModel.Status.Error = err.Error()
 				if updateErr := r.Status().Update(ctx, ollamaModel); updateErr != nil {
 					return ctrl.Result{}, updateErr
@@ -118,7 +118,7 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	} else {
 		// Model exists, update to ready if not already
-		if ollamaModel.Status.State != "ready" {
+		if ollamaModel.Status.State != ollamamodel.StateReady {
 			log.Info("model already exists, marking as ready", "name", ollamaModel.Name, "model", modelName)
 			return r.updateModelDetails(ctx, ollamaModel, modelName)
 		}
@@ -128,12 +128,12 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 // updateModelDetails updates the OllamaModel details including state, digest, and size
-func (r *OllamaModelReconciler) updateModelDetails(ctx context.Context, ollamaModel *ollamav1alpha1.OllamaModel, modelName string) (ctrl.Result, error) {
+func (r *OllamaModelReconciler) updateModelDetails(ctx context.Context, ollamaModel *ollamamodel.OllamaModel, modelName string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Update state to ready
 	now := metav1.Now()
-	ollamaModel.Status.State = "ready"
+	ollamaModel.Status.State = ollamamodel.StateReady
 	ollamaModel.Status.LastPullTime = &now
 
 	// Get model details
@@ -216,7 +216,7 @@ func formatBytes(bytes int64) string {
 }
 
 // handleDeletion handles the deletion of a model when the OllamaModel resource is deleted
-func (r *OllamaModelReconciler) handleDeletion(ctx context.Context, ollamaModel *ollamav1alpha1.OllamaModel, modelName string) (ctrl.Result, error) {
+func (r *OllamaModelReconciler) handleDeletion(ctx context.Context, ollamaModel *ollamamodel.OllamaModel, modelName string) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
 	// Check if the finalizer exists
@@ -244,7 +244,7 @@ func (r *OllamaModelReconciler) handleDeletion(ctx context.Context, ollamaModel 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OllamaModelReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&ollamav1alpha1.OllamaModel{}).
+		For(&ollamamodel.OllamaModel{}).
 		Named("ollamamodel").
 		Complete(r)
 }

@@ -94,13 +94,13 @@ spec:
                 minimum: 0
                 type: integer
               state:
-                description: State represents the current state of the model (pending,
-                  pulling, ready, failed)
+                description: State represents the current state of the model (Pending,
+                  Pulling, Ready, Failed)
                 enum:
-                - pending
-                - pulling
-                - ready
-                - failed
+                - Pending
+                - Pulling
+                - Ready
+                - Failed
                 type: string
             type: object
         type: object

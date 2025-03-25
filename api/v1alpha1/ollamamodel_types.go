@@ -23,6 +23,21 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// ModelState represents the current state of a model
+// +kubebuilder:validation:Enum=Pending;Pulling;Ready;Failed
+type ModelState string
+
+const (
+	// StatePending indicates the model is pending to be pulled
+	StatePending ModelState = "Pending"
+	// StatePulling indicates the model is currently being pulled
+	StatePulling ModelState = "Pulling"
+	// StateReady indicates the model is pulled and ready to use
+	StateReady ModelState = "Ready"
+	// StateFailed indicates the model pull has failed
+	StateFailed ModelState = "Failed"
+)
+
 // OllamaModelSpec defines the desired state of OllamaModel.
 type OllamaModelSpec struct {
 	// Name is the name of the Ollama model (e.g., "llama3.2", "gemma3")
@@ -37,11 +52,10 @@ type OllamaModelSpec struct {
 }
 
 // OllamaModelStatus defines the observed state of OllamaModel.
-// +kubebuilder:default=pending
+// +kubebuilder:default=Pending
 type OllamaModelStatus struct {
-	// State represents the current state of the model (pending, pulling, ready, failed)
-	// +kubebuilder:validation:Enum=pending;pulling;ready;failed
-	State string `json:"state,omitempty"`
+	// State represents the current state of the model (Pending, Pulling, Ready, Failed)
+	State ModelState `json:"state,omitempty"`
 
 	// LastPullTime is the timestamp of the last successful model pull
 	// +kubebuilder:validation:Type=string
