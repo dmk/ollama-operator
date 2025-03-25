@@ -1,16 +1,26 @@
 # ollama-operator
-// TODO(user): Add simple overview of use/purpose
+
+A Kubernetes operator for declarative management of Ollama models through Kubernetes custom resources.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+The Ollama Operator provides a Kubernetes-native way to manage [Ollama](https://ollama.com/) models in your cluster. It allows you to:
+
+- Declaratively specify which Ollama models should be available
+- Automatically pull models when they are added as resources
+- Track the state of models (pending, pulling, ready, failed)
+- Automatically remove models when the resources are deleted
+
+This operator makes it easy to integrate Ollama's large language models into your Kubernetes infrastructure using GitOps principles and standard Kubernetes tooling.
 
 ## Getting Started
 
 ### Prerequisites
 - go version v1.23.0+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- docker version 17.03+
+- kubectl version v1.11.3+
+- Access to a Kubernetes v1.11.3+ cluster
+- [Ollama](https://ollama.com/) running in your cluster or accessible to the operator
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**
@@ -21,7 +31,7 @@ make docker-build docker-push IMG=<some-registry>/ollama-operator:tag
 
 **NOTE:** This image ought to be published in the personal registry you specified.
 And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+Make sure you have the proper permission to the registry if the above commands don't work.
 
 **Install the CRDs into the cluster:**
 
@@ -38,84 +48,92 @@ make deploy IMG=<some-registry>/ollama-operator:tag
 > **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
 privileges or be logged in as admin.
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+### Create Ollama Model Resources
+
+Once the operator is running, you can create OllamaModel custom resources to manage models. For example:
+
+```yaml
+apiVersion: ollama.smithforge.dev/v1alpha1
+kind: OllamaModel
+metadata:
+  name: llama3.2-1b
+spec:
+  name: llama3.2  # Model name (as recognized by Ollama)
+  tag: 1b         # Model tag/version
+```
+
+The operator will ensure that the specified model is pulled and ready in your Ollama instance. You can check the status using:
+
+```sh
+kubectl get ollamamodels
+```
+
+Sample resources can be found in the `config/samples/` directory.
+
+You can apply the samples with:
 
 ```sh
 kubectl apply -k config/samples/
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+### Current Status and Limitations
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+The operator has been tested with a standard Kubernetes setup. Note that:
+
+- The operator does not deploy Ollama itself - it manages models for an existing Ollama installation
+- GPU acceleration requires proper configuration of your Ollama deployment
+- For production use cases, you may need to customize resource limits
+
+## Technical Details
+
+### Custom Resource Definition
+
+The operator introduces a new Custom Resource Definition (CRD) called `OllamaModel` with the following specification:
+
+```yaml
+spec:
+  name: <model-name>   # Name of the Ollama model (e.g., llama3.2, gemma3)
+  tag: <model-tag>     # Version/tag of the model (e.g., 7b, 1b)
+```
+
+The resource reports the following status fields:
+
+```yaml
+status:
+  state: <pending|pulling|ready|failed>  # Current state of the model
+  lastPullTime: <timestamp>              # When the model was last pulled
+  digest: <sha256>                       # Model file SHA256 digest
+  size: <bytes>                          # Size of the model in bytes
+  error: <message>                       # Error message if in failed state
+```
+
+### Architecture
+
+The operator connects to the Ollama API to:
+1. Check if requested models exist
+2. Pull models that don't exist
+3. Delete models when resources are removed
+4. Update status information about each model
+
+## Uninstalling
+
+**Delete all model instances (CRs) from the cluster:**
 
 ```sh
 kubectl delete -k config/samples/
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+**Delete the APIs (CRDs) from the cluster:**
 
 ```sh
 make uninstall
 ```
 
-**UnDeploy the controller from the cluster:**
+**Undeploy the controller from the cluster:**
 
 ```sh
 make undeploy
 ```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/ollama-operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/ollama-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v1-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
