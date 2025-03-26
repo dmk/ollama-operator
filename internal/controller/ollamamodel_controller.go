@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,11 +34,19 @@ import (
 	"github.com/ollama/ollama/api"
 )
 
+// OllamaClient defines the interface for interacting with the Ollama API
+type OllamaClient interface {
+	Delete(ctx context.Context, req *api.DeleteRequest) error
+	Show(ctx context.Context, req *api.ShowRequest) (*api.ShowResponse, error)
+	Pull(ctx context.Context, req *api.PullRequest, fn api.PullProgressFunc) error
+	List(ctx context.Context) (*api.ListResponse, error)
+}
+
 // OllamaModelReconciler reconciles a OllamaModel object
 type OllamaModelReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
-	Ollama   *api.Client
+	Ollama   OllamaClient
 	Recorder record.EventRecorder
 }
 
@@ -71,7 +80,8 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Info("adding finalizer", "name", ollamaModel.Name)
 		controllerutil.AddFinalizer(ollamaModel, ollamaModelFinalizer)
 		if err := r.Update(ctx, ollamaModel); err != nil {
-			return ctrl.Result{}, err
+			// If update fails, retry after a short delay
+			return ctrl.Result{RequeueAfter: time.Second * 5}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -89,7 +99,8 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Info("initializing model status", "name", ollamaModel.Name)
 		ollamaModel.Status.State = ollamamodel.StatePending
 		if err := r.Status().Update(ctx, ollamaModel); err != nil {
-			return ctrl.Result{}, err
+			// If update fails, retry after a short delay
+			return ctrl.Result{RequeueAfter: time.Second * 5}, err
 		}
 		return ctrl.Result{}, nil
 	}
@@ -103,7 +114,8 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Info("starting model pull", "name", ollamaModel.Name, "model", modelName)
 			ollamaModel.Status.State = ollamamodel.StatePulling
 			if err := r.Status().Update(ctx, ollamaModel); err != nil {
-				return ctrl.Result{}, err
+				// If update fails, retry after a short delay
+				return ctrl.Result{RequeueAfter: time.Second * 5}, err
 			}
 
 			// Actually pull the model
@@ -117,9 +129,11 @@ func (r *OllamaModelReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				ollamaModel.Status.State = ollamamodel.StateFailed
 				ollamaModel.Status.Error = err.Error()
 				if updateErr := r.Status().Update(ctx, ollamaModel); updateErr != nil {
-					return ctrl.Result{}, updateErr
+					// If update fails, retry after a short delay
+					return ctrl.Result{RequeueAfter: time.Second * 5}, updateErr
 				}
-				return ctrl.Result{}, err
+				// Return error to trigger retry
+				return ctrl.Result{RequeueAfter: time.Second * 30}, err
 			}
 
 			log.Info("model pull completed successfully", "name", ollamaModel.Name, "model", modelName)
@@ -179,9 +193,20 @@ func (r *OllamaModelReconciler) updateModelDetails(ctx context.Context, ollamaMo
 		}
 	}
 
-	if err := r.Status().Update(ctx, ollamaModel); err != nil {
-		return ctrl.Result{}, err
+	// Use exponential backoff for status updates
+	maxRetries := 3
+	for i := 0; i < maxRetries; i++ {
+		if err := r.Status().Update(ctx, ollamaModel); err != nil {
+			if i == maxRetries-1 {
+				return ctrl.Result{}, err
+			}
+			// Wait with exponential backoff before retrying
+			time.Sleep(time.Second * time.Duration(1<<uint(i)))
+			continue
+		}
+		break
 	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -230,12 +255,28 @@ func (r *OllamaModelReconciler) handleDeletion(ctx context.Context, ollamaModel 
 
 	// Check if the finalizer exists
 	if controllerutil.ContainsFinalizer(ollamaModel, ollamaModelFinalizer) {
-		// Delete the model from Ollama
-		deleteReq := &api.DeleteRequest{Name: modelName}
-		if err := r.Ollama.Delete(ctx, deleteReq); err != nil {
-			log.Error(err, "failed to delete model from Ollama", "model", modelName)
+		// Delete the model from Ollama with retries
+		maxRetries := 3
+		var deleteErr error
+		for i := 0; i < maxRetries; i++ {
+			deleteReq := &api.DeleteRequest{Name: modelName}
+			deleteErr = r.Ollama.Delete(ctx, deleteReq)
+			if deleteErr == nil {
+				break
+			}
+			// If model not found, that's fine - it's already deleted
+			if strings.Contains(deleteErr.Error(), "model not found") {
+				deleteErr = nil
+				break
+			}
+			// Wait with exponential backoff before retrying
+			time.Sleep(time.Second * time.Duration(1<<uint(i)))
+		}
+
+		if deleteErr != nil {
+			log.Error(deleteErr, "failed to delete model from Ollama after retries", "model", modelName)
 			// We don't return an error here as we still want to allow deletion of the resource
-			// even if the model deletion fails (e.g., if the model doesn't exist)
+			// even if the model deletion fails
 		} else {
 			log.Info("successfully deleted model from Ollama", "model", modelName)
 		}
@@ -243,7 +284,8 @@ func (r *OllamaModelReconciler) handleDeletion(ctx context.Context, ollamaModel 
 		// Remove the finalizer to allow the resource to be deleted
 		controllerutil.RemoveFinalizer(ollamaModel, ollamaModelFinalizer)
 		if err := r.Update(ctx, ollamaModel); err != nil {
-			return ctrl.Result{}, err
+			// If update fails, retry after a short delay
+			return ctrl.Result{RequeueAfter: time.Second * 5}, err
 		}
 	}
 
@@ -260,30 +302,40 @@ func (r *OllamaModelReconciler) refreshModel(ctx context.Context, ollamaModel *o
 	// Set state to pulling to indicate a refresh is in progress
 	ollamaModel.Status.State = ollamamodel.StatePulling
 	if err := r.Status().Update(ctx, ollamaModel); err != nil {
-		return ctrl.Result{}, err
+		// If update fails, retry after a short delay
+		return ctrl.Result{RequeueAfter: time.Second * 5}, err
 	}
 
-	// Pull the model
-	log.Info("starting model refresh", "name", ollamaModel.Name, "model", modelName)
-	pullReq := &api.PullRequest{Name: modelName}
-	err := r.Ollama.Pull(ctx, pullReq, func(resp api.ProgressResponse) error {
-		log.Info("refresh progress", "model", modelName, "status", resp.Status, "completed", resp.Completed)
-		return nil
-	})
+	// Pull the model with retries
+	maxRetries := 3
+	var pullErr error
+	for i := 0; i < maxRetries; i++ {
+		pullReq := &api.PullRequest{Name: modelName}
+		pullErr = r.Ollama.Pull(ctx, pullReq, func(resp api.ProgressResponse) error {
+			log.Info("refresh progress", "model", modelName, "status", resp.Status, "completed", resp.Completed)
+			return nil
+		})
+		if pullErr == nil {
+			break
+		}
+		// Wait with exponential backoff before retrying
+		time.Sleep(time.Second * time.Duration(1<<uint(i)))
+	}
 
-	if err != nil {
-		log.Error(err, "failed to refresh model", "model", modelName)
+	if pullErr != nil {
+		log.Error(pullErr, "failed to refresh model after retries", "model", modelName)
 		ollamaModel.Status.State = ollamamodel.StateFailed
-		ollamaModel.Status.Error = err.Error()
+		ollamaModel.Status.Error = pullErr.Error()
 
 		// Record event for refresh failure
 		r.Recorder.Event(ollamaModel, "Warning", "RefreshFailed",
-			fmt.Sprintf("Failed to refresh model %s: %v", modelName, err))
+			fmt.Sprintf("Failed to refresh model %s: %v", modelName, pullErr))
 
 		if updateErr := r.Status().Update(ctx, ollamaModel); updateErr != nil {
-			return ctrl.Result{}, updateErr
+			// If update fails, retry after a short delay
+			return ctrl.Result{RequeueAfter: time.Second * 5}, updateErr
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{RequeueAfter: time.Second * 30}, pullErr
 	}
 
 	// Update the model details
@@ -298,7 +350,8 @@ func (r *OllamaModelReconciler) refreshModel(ctx context.Context, ollamaModel *o
 	}
 	ollamaModel.Annotations["ollama.smithforge.dev/refresh"] = fmt.Sprintf("completed-%s", time.Now().Format(time.RFC3339))
 	if err := r.Update(ctx, ollamaModel); err != nil {
-		return ctrl.Result{}, err
+		// If update fails, retry after a short delay
+		return ctrl.Result{RequeueAfter: time.Second * 5}, err
 	}
 
 	// Record event for successful refresh
