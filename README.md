@@ -148,13 +148,53 @@ After processing the refresh, the annotation value will be updated with a timest
 The following features are planned for upcoming releases:
 
 1. **Model Updates/Refreshes** - Force models to be re-pulled using annotations (implemented)
-2. **Error Recovery** - Automatically recover if Ollama loses models but the CRD still exists
-3. **Health Checks** - Periodically verify models are still available in Ollama
-4. **Resource Management** - Add configuration for resource limits/requests
-5. **Events** - Record Kubernetes events for important state changes
-6. **Metrics** - Export Prometheus metrics for model usage and metadata
-7. **Webhook Validation** - Add validation webhooks to prevent invalid configurations
-8. **Multiple Ollama Instances** - Support targeting different Ollama instances
+2. **HTTP API** - RESTful API for managing models without direct Kubernetes access (implemented)
+3. **Error Recovery** - Automatically recover if Ollama loses models but the CRD still exists
+4. **Health Checks** - Periodically verify models are still available in Ollama
+5. **Resource Management** - Add configuration for resource limits/requests
+6. **Events** - Record Kubernetes events for important state changes
+7. **Metrics** - Export Prometheus metrics for model usage and metadata
+8. **Webhook Validation** - Add validation webhooks to prevent invalid configurations
+9. **Multiple Ollama Instances** - Support targeting different Ollama instances
+
+## HTTP API
+
+The operator provides an optional HTTP API server that allows you to manage Ollama models without direct access to the Kubernetes API. This is particularly useful for integrating with applications that don't have Kubernetes credentials.
+
+### Enabling the API Server
+
+To enable the API server, pass the `--enable-api-server` flag when running the operator:
+
+```sh
+# When running locally
+make run ARGS="--enable-api-server --api-server-bind-address=:8082"
+
+# When deploying to Kubernetes
+# Edit config/manager/kustomization.yaml to add the following flags:
+# --enable-api-server --api-server-bind-address=:8082
+```
+
+### API Authentication
+
+You can secure the API with an API key by using the `--api-server-key` flag:
+
+```sh
+make run ARGS="--enable-api-server --api-server-bind-address=:8082 --api-server-key=your-secret-key"
+```
+
+Clients must then include this key in the `X-API-Key` header when making requests.
+
+### API Endpoints
+
+The API provides the following endpoints:
+
+- `GET /api/v1/models` - List all models
+- `GET /api/v1/models/{name}` - Get details of a specific model
+- `POST /api/v1/models` - Create a new model
+- `DELETE /api/v1/models/{name}` - Delete a model
+- `POST /api/v1/models/{name}/refresh` - Refresh a model
+
+See the [API docs](docs/api-usage.md) for detailed usage instructions and client code samples.
 
 ## Uninstalling
 

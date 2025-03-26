@@ -40,8 +40,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	ollamav1alpha1 "github.com/dmk/ollama-operator/api/v1alpha1"
+	httpapi "github.com/dmk/ollama-operator/internal/api"
 	"github.com/dmk/ollama-operator/internal/controller"
-	"github.com/ollama/ollama/api"
+	ollamaapi "github.com/ollama/ollama/api"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -67,6 +68,10 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var ollamaAPIURL string
+	var apiServerAddr string
+	var apiServerKey string
+	var namespace string = "default"
+	var enableAPIServer bool
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -75,6 +80,10 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.StringVar(&ollamaAPIURL, "ollama-api-url", "http://localhost:11434", "The URL of the Ollama API server")
+	flag.StringVar(&apiServerAddr, "api-server-bind-address", ":8082", "The address the HTTP API server binds to.")
+	flag.StringVar(&apiServerKey, "api-server-key", "", "The API key for authenticating requests to the API server.")
+	flag.StringVar(&namespace, "namespace", namespace, "The namespace to use for operations.")
+	flag.BoolVar(&enableAPIServer, "enable-api-server", false, "Enable the HTTP API server.")
 	flag.BoolVar(&secureMetrics, "metrics-secure", true,
 		"If set, the metrics endpoint is served securely via HTTPS. Use --metrics-secure=false to use HTTP instead.")
 	flag.StringVar(&webhookCertPath, "webhook-cert-path", "", "The directory that contains the webhook certificate.")
@@ -214,7 +223,7 @@ func main() {
 		setupLog.Error(err, "invalid Ollama API URL")
 		os.Exit(1)
 	}
-	ollamaClient := api.NewClient(ollamaURL, http.DefaultClient)
+	ollamaClient := ollamaapi.NewClient(ollamaURL, http.DefaultClient)
 
 	if err = (&controller.OllamaModelReconciler{
 		Client:   mgr.GetClient(),
@@ -239,6 +248,22 @@ func main() {
 		setupLog.Info("Adding webhook certificate watcher to manager")
 		if err := mgr.Add(webhookCertWatcher); err != nil {
 			setupLog.Error(err, "unable to add webhook certificate watcher to manager")
+			os.Exit(1)
+		}
+	}
+
+	// Initialize API server if enabled
+	if enableAPIServer {
+		setupLog.Info("initializing API server", "address", apiServerAddr)
+
+		apiServer := httpapi.NewServer(httpapi.Config{
+			BindAddress: apiServerAddr,
+			APIKey:      apiServerKey,
+			Namespace:   namespace,
+		}, mgr.GetClient())
+
+		if err := mgr.Add(apiServer); err != nil {
+			setupLog.Error(err, "unable to set up API server")
 			os.Exit(1)
 		}
 	}
